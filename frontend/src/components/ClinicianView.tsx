@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Dose, Intervention, Patient, PrescribeForm, Prescription, Risk } from '../types';
+import type { Dose, Intervention, MedicineLine, Patient, PrescribeForm, Prescription, Risk } from '../types';
 import { FREQUENCY_PRESETS, MEDICINE_SUGGESTIONS, fmtDay, fmtTime, hhmmTo12, todayLocal } from '../utils/schedule';
 import {
   Send, CheckCircle2, UserCheck, Clock, Pill, Sparkles, Activity, History, RefreshCw, FileCheck,
-  AlertTriangle, Users, PackagePlus, ShieldAlert,
+  AlertTriangle, Users, PackagePlus, ShieldAlert, Plus, Trash2, X,
 } from 'lucide-react';
 
 export interface PushReceipt {
   patientName: string;
   serial: string;
-  prescription: Prescription;
+  prescriptions: Prescription[];
   at: Date;
   paired: boolean;
 }
@@ -61,6 +61,56 @@ function newSerial() {
   return `MA-${String(Math.floor(1000 + Math.random() * 9000))}`;
 }
 
+const MAX_TIMES = 6; // backend limit per medicine
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** A medicine row in the form. dispensedOverride = null means "use the suggested amount". */
+interface MedLineState extends Omit<MedicineLine, 'dosesDispensed'> {
+  key: number;
+  dispensedOverride: string | null;
+}
+
+let lineKey = 0;
+function newLine(medicationName = '', dosage = '1 tablet by mouth'): MedLineState {
+  return {
+    key: ++lineKey, medicationName, dosage, times: ['08:00', '20:00'],
+    ongoing: false, durationDays: 7, dispensedOverride: null,
+  };
+}
+
+function suggestedDoses(m: MedLineState) {
+  return m.times.length * (m.ongoing ? 30 : m.durationDays);
+}
+
+function dosesFor(m: MedLineState) {
+  return m.dispensedOverride === null ? suggestedDoses(m) : Math.max(0, Number(m.dispensedOverride) || 0);
+}
+
+/** A sensible next slot when the clinician adds a time: 4 hours after the last one. */
+function nextTime(times: string[]) {
+  const last = [...times].sort().pop();
+  if (!last) return '08:00';
+  const [h, m] = last.split(':').map(Number);
+  return `${String((h + 4) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Same rules as the backend, checked before anything is saved. */
+function validateMedicines(lines: MedLineState[]): string {
+  if (lines.length === 0) return 'Add at least one medicine.';
+  const names = new Set<string>();
+  for (const [i, m] of lines.entries()) {
+    const label = m.medicationName.trim() || `Medicine ${i + 1}`;
+    if (!m.medicationName.trim()) return `Medicine ${i + 1}: enter the medicine name.`;
+    const key = m.medicationName.trim().toLowerCase();
+    if (names.has(key)) return `${label} is listed twice. Combine them into one line with several times.`;
+    names.add(key);
+    if (m.times.length === 0) return `${label}: add at least one dose time.`;
+    if (m.times.some((t) => !HHMM.test(t))) return `${label}: every dose time needs hours and minutes.`;
+    if (new Set(m.times).size !== m.times.length) return `${label}: the same time is entered twice.`;
+  }
+  return '';
+}
+
 export const ClinicianView: React.FC<ClinicianViewProps> = ({
   patients, selected, onSelect, prescriptions, doses, interventions, lastPush,
   onPush, onResolve, onDispense, onRunMonitor,
@@ -71,22 +121,18 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
   const [condition, setCondition] = useState('');
   const [facility, setFacility] = useState('');
   const [wearableSerial, setWearableSerial] = useState(newSerial);
-  const [medicationName, setMedicationName] = useState('Amoxicillin 500mg');
-  const [dosage, setDosage] = useState('1 capsule by mouth');
-  const [frequency, setFrequency] = useState(FREQUENCY_PRESETS[1].label);
-  const [ongoing, setOngoing] = useState(false);
-  const [durationDays, setDurationDays] = useState(7);
+  const [medicines, setMedicines] = useState<MedLineState[]>(() => [newLine('Amoxicillin 500mg', '1 capsule by mouth')]);
   const [startDate, setStartDate] = useState(() => todayLocal());
   const [prescriber, setPrescriber] = useState('');
   const [notes, setNotes] = useState('Take with food and a full glass of water.');
-  const [dispensedOverride, setDispensedOverride] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState('');
 
-  const times = FREQUENCY_PRESETS.find((f) => f.label === frequency)?.times ?? ['08:00', '20:00'];
-  const defaultDispensed = times.length * (ongoing ? 30 : durationDays);
-  const dosesDispensed = dispensedOverride === null ? defaultDispensed : Math.max(0, Number(dispensedOverride) || 0);
+  const updateLine = (key: number, patch: Partial<MedLineState>) =>
+    setMedicines((ms) => ms.map((m) => (m.key === key ? { ...m, ...patch } : m)));
+  const removeLine = (key: number) => setMedicines((ms) => ms.filter((m) => m.key !== key));
+  const addLine = () => setMedicines((ms) => [...ms, newLine()]);
 
   useEffect(() => {
     if (target === 'selected' && selected) setWearableSerial(selected.device?.serial ?? newSerial());
@@ -95,17 +141,26 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
 
   const handleConfirmAndPush = async (e: React.FormEvent) => {
     e.preventDefault();
+    const problem = validateMedicines(medicines);
+    if (problem) { setFormError(problem); return; }
     setIsSubmitting(true);
     setFormError('');
     try {
       await onPush({
-        target, patientName, condition, facility, wearableSerial, medicationName, dosage, times,
-        ongoing, durationDays, startDate, prescriber, notes, dosesDispensed,
+        target, patientName, condition, facility, wearableSerial, startDate, prescriber, notes,
+        medicines: medicines.map((m) => ({
+          medicationName: m.medicationName,
+          dosage: m.dosage,
+          times: [...m.times].sort(),
+          ongoing: m.ongoing,
+          durationDays: m.durationDays,
+          dosesDispensed: dosesFor(m),
+        })),
       });
       if (target === 'new') {
         setPatientName(''); setCondition(''); setWearableSerial(newSerial());
       }
-      setDispensedOverride(null);
+      setMedicines([newLine()]);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Could not save the prescription');
     } finally {
@@ -114,10 +169,12 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
   };
 
   // ---------- Selected patient telemetry ----------
-  const activeRx = prescriptions.find((r) => r.status === 'active') ?? prescriptions[0] ?? null;
-  const rxDoses = useMemo(() => doses.filter((d) => !activeRx || d.prescription_id === activeRx.id), [doses, activeRx]);
-  const takenCount = rxDoses.filter((d) => d.status === 'taken').length;
-  const resolvedCount = rxDoses.filter((d) => d.status !== 'pending').length;
+  const activeRxs = prescriptions.filter((r) => r.status === 'active');
+  // Show every active medicine; if none is active, show the most recent one.
+  const shownRxs = activeRxs.length ? activeRxs : prescriptions.slice(0, 1);
+  const drugById = useMemo(() => new Map(prescriptions.map((r) => [r.id, r.drug_name])), [prescriptions]);
+  const takenCount = doses.filter((d) => d.status === 'taken').length;
+  const resolvedCount = doses.filter((d) => d.status !== 'pending').length;
   const adherencePct = resolvedCount ? Math.round((takenCount / resolvedCount) * 100) : 0;
 
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -249,55 +306,31 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="f-med" className={labelCls}>Medicine Name</label>
-                <input id="f-med" list="medicines" value={medicationName} onChange={(e) => setMedicationName(e.target.value)} className={inputCls} required maxLength={120} />
-                <datalist id="medicines">{MEDICINE_SUGGESTIONS.map((m) => <option key={m} value={m} />)}</datalist>
-              </div>
-              <div>
-                <label htmlFor="f-dose" className={labelCls}>Dosage Instructions</label>
-                <input id="f-dose" value={dosage} onChange={(e) => setDosage(e.target.value)} className={inputCls} required maxLength={100} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="f-freq" className={labelCls}>Frequency</label>
-                <select id="f-freq" value={frequency} onChange={(e) => setFrequency(e.target.value)} className={inputCls}>
-                  {FREQUENCY_PRESETS.map((f) => (
-                    <option key={f.label} value={f.label}>{f.label} — {f.times.map(hhmmTo12).join(', ')}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="f-days" className="text-xs font-medium text-slate-300">Course Duration</label>
-                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
-                    <input type="checkbox" checked={ongoing} onChange={(e) => setOngoing(e.target.checked)} className="accent-cyan-400" />
-                    Ongoing (chronic)
-                  </label>
-                </div>
-                <div className={`flex items-center gap-3 ${ongoing ? 'opacity-40' : ''}`}>
-                  <input id="f-days" type="range" min={1} max={30} value={durationDays} disabled={ongoing}
-                    onChange={(e) => setDurationDays(Number(e.target.value))}
-                    className="w-full accent-cyan-400 bg-slate-800 rounded-lg cursor-pointer" />
-                  <span className="px-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-cyan-400 font-bold text-sm min-w-[78px] text-center">
-                    {ongoing ? 'Ongoing' : `${durationDays} Days`}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <fieldset className="space-y-3">
+              <legend className="text-xs font-semibold text-slate-200 mb-2">
+                Medicines <span className="font-normal text-slate-500">({medicines.length})</span>
+              </legend>
+              {medicines.map((m, i) => (
+                <MedicineCard
+                  key={m.key}
+                  line={m}
+                  index={i}
+                  canRemove={medicines.length > 1}
+                  onChange={(patch) => updateLine(m.key, patch)}
+                  onRemove={() => removeLine(m.key)}
+                />
+              ))}
+              <button type="button" onClick={addLine}
+                className="w-full py-2.5 rounded-xl border border-dashed border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/10 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
+                <Plus className="w-4 h-4" /> Add another medicine
+              </button>
+              <datalist id="medicines">{MEDICINE_SUGGESTIONS.map((name) => <option key={name} value={name} />)}</datalist>
+            </fieldset>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="f-start" className={labelCls}>Start Date</label>
                 <input id="f-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} required />
-              </div>
-              <div>
-                <label htmlFor="f-disp" className={labelCls}>Doses Handed Out Now</label>
-                <input id="f-disp" type="number" min={0} max={10000} value={dispensedOverride ?? String(defaultDispensed)}
-                  onChange={(e) => setDispensedOverride(e.target.value)} className={inputCls} />
               </div>
               {target === 'new' && (
                 <div>
@@ -320,11 +353,11 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
                 className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold text-base shadow-lg shadow-cyan-500/25 transition-all duration-300 flex items-center justify-center gap-3 group relative overflow-hidden disabled:opacity-50">
                 <div className="absolute inset-0 bg-shimmer pointer-events-none" />
                 <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                <span>{isSubmitting ? 'Saving…' : 'Confirm and Push to Wearable'}</span>
+                <span>{isSubmitting ? 'Saving…' : medicines.length > 1 ? `Confirm ${medicines.length} Medicines and Push` : 'Confirm and Push to Wearable'}</span>
                 <Sparkles className="w-4 h-4 text-cyan-200 animate-pulse" />
               </button>
               <p className="text-[11px] text-center text-slate-400 mt-2">
-                Saves the prescription, records what was handed out, and the wearable picks up the schedule on its next sync.
+                Saves each medicine as its own prescription, records what was handed out, and the wearable picks up the schedule on its next sync.
               </p>
             </div>
           </form>
@@ -346,10 +379,20 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
               </div>
               <dl className="bg-slate-950/80 rounded-xl p-4 border border-slate-800/80 space-y-2 text-xs">
                 <Row k="Target Device" v={<span className="font-mono text-cyan-300">{lastPush.serial}{lastPush.paired ? ' (newly paired)' : ''}</span>} />
-                <Row k="Prescription" v={lastPush.prescription.drug_name} />
-                <Row k="Schedule" v={`${lastPush.prescription.times.map(hhmmTo12).join(', ')} · ${lastPush.prescription.duration_days ? `${lastPush.prescription.duration_days} days · ${lastPush.prescription.doses_total} doses` : 'ongoing'}`} />
-                <Row k="Dispensed" v={<span className="text-emerald-400 font-semibold flex items-center gap-1"><FileCheck className="w-3.5 h-3.5" />{lastPush.prescription.supply?.doses_supplied ?? 0} doses</span>} />
               </dl>
+              <ul className="space-y-2">
+                {lastPush.prescriptions.map((rx) => (
+                  <li key={rx.id} className="bg-slate-950/80 rounded-xl p-3 border border-slate-800/80 text-xs space-y-1">
+                    <p className="font-semibold text-slate-100">{rx.drug_name}</p>
+                    <p className="text-slate-400">
+                      {rx.times.map(hhmmTo12).join(', ')} · {rx.duration_days ? `${rx.duration_days} days · ${rx.doses_total} doses` : 'ongoing'}
+                    </p>
+                    <p className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <FileCheck className="w-3.5 h-3.5" />{rx.supply?.doses_supplied ?? 0} doses dispensed
+                    </p>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : (
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 text-center space-y-3">
@@ -380,26 +423,36 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
               </ul>
             )}
 
-            {selected && activeRx && (
+            {selected && shownRxs.length > 0 && (
               <>
-                <div className="text-xs text-slate-300 space-y-1">
-                  <p><span className="font-semibold text-slate-100">{activeRx.drug_name}</span> <span className="text-slate-500">({activeRx.status})</span></p>
-                  <p className="text-[11px] text-slate-400">
-                    {activeRx.times.map(hhmmTo12).join(', ')} · {activeRx.duration_days ? `${activeRx.duration_days}-day course` : 'ongoing'}
-                    {activeRx.supply && activeRx.supply.doses_supplied > 0 && <> · {activeRx.supply.doses_remaining} doses left{activeRx.supply.days_remaining !== null && ` (${activeRx.supply.days_remaining.toFixed(1)} days)`}</>}
-                  </p>
-                  {activeRx.supply?.refill_due && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Refill due</span>
-                  )}
-                </div>
-
-                {activeRx.status === 'active' && (
-                  <DispenseForm onDispense={(n) => run('dispense', () => onDispense(activeRx.id, n))} defaultDoses={activeRx.times.length * (activeRx.duration_days ?? 30)} />
-                )}
+                <ul className="space-y-3">
+                  {shownRxs.map((rx) => (
+                    <li key={rx.id} className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-300 space-y-2">
+                      <div className="space-y-1">
+                        <p><span className="font-semibold text-slate-100">{rx.drug_name}</span> <span className="text-slate-500">({rx.status})</span></p>
+                        <p className="text-[11px] text-slate-400">
+                          {rx.times.map(hhmmTo12).join(', ')} · {rx.duration_days ? `${rx.duration_days}-day course` : 'ongoing'}
+                          {rx.supply && rx.supply.doses_supplied > 0 && <> · {rx.supply.doses_remaining} doses left{rx.supply.days_remaining !== null && ` (${rx.supply.days_remaining.toFixed(1)} days)`}</>}
+                        </p>
+                        {rx.supply?.refill_due && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Refill due</span>
+                        )}
+                      </div>
+                      {rx.status === 'active' && (
+                        <DispenseForm
+                          id={`disp-${rx.id}`}
+                          drugName={rx.drug_name}
+                          onDispense={(n) => run('dispense', () => onDispense(rx.id, n))}
+                          defaultDoses={rx.times.length * (rx.duration_days ?? 30)}
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
 
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs font-semibold">
-                    <span className="text-slate-300">Doses taken (last 14 days)</span>
+                    <span className="text-slate-300">Doses taken, all medicines (last 14 days)</span>
                     <span className="text-cyan-400 font-mono">{resolvedCount ? `${adherencePct}%` : '—'}</span>
                   </div>
                   <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800" role="progressbar" aria-valuenow={adherencePct} aria-valuemin={0} aria-valuemax={100}>
@@ -414,9 +467,10 @@ export const ClinicianView: React.FC<ClinicianViewProps> = ({
                 {doses.length === 0 && <li className="text-xs text-slate-400">No doses scheduled.</li>}
                 {doses.slice(0, 20).map((dose) => (
                   <li key={dose.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
-                    <div className="flex items-center space-x-2.5">
-                      <span className={`w-2 h-2 rounded-full ${statusDot[dose.status]}`} aria-hidden />
-                      <span className="font-semibold text-slate-200">{fmtDay(dose.scheduled_at)}</span>
+                    <div className="flex items-center space-x-2.5 min-w-0">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot[dose.status]}`} aria-hidden />
+                      <span className="font-semibold text-slate-200 whitespace-nowrap">{fmtDay(dose.scheduled_at)}</span>
+                      <span className="text-slate-400 truncate">{drugById.get(dose.prescription_id) ?? ''}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-slate-400 font-mono">{fmtTime(dose.scheduled_at)}</span>
@@ -442,19 +496,128 @@ const Row: React.FC<{ k: string; v: React.ReactNode }> = ({ k, v }) => (
   </div>
 );
 
-const DispenseForm: React.FC<{ onDispense: (n: number) => void; defaultDoses: number }> = ({ onDispense, defaultDoses }) => {
+const DispenseForm: React.FC<{ id: string; drugName: string; onDispense: (n: number) => void; defaultDoses: number }> = ({ id, drugName, onDispense, defaultDoses }) => {
   const [n, setN] = useState(String(defaultDoses));
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (Number(n) > 0) onDispense(Number(n)); }} className="flex items-end gap-2">
       <div className="flex-1">
-        <label htmlFor="disp-n" className="block text-[11px] text-slate-400 mb-1">Record a refill (doses handed out)</label>
-        <input id="disp-n" type="number" min={1} value={n} onChange={(e) => setN(e.target.value)}
+        <label htmlFor={id} className="block text-[11px] text-slate-400 mb-1">Record a refill of {drugName} (doses handed out)</label>
+        <input id={id} type="number" min={1} value={n} onChange={(e) => setN(e.target.value)}
           className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 text-xs focus:outline-none focus:border-cyan-500" />
       </div>
       <button type="submit" className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1">
         <PackagePlus className="w-3.5 h-3.5" /> Dispense
       </button>
     </form>
+  );
+};
+
+const MedicineCard: React.FC<{
+  line: MedLineState;
+  index: number;
+  canRemove: boolean;
+  onChange: (patch: Partial<MedLineState>) => void;
+  onRemove: () => void;
+}> = ({ line, index, canRemove, onChange, onRemove }) => {
+  const id = (name: string) => `m${line.key}-${name}`;
+  const setTime = (i: number, value: string) => onChange({ times: line.times.map((t, j) => (j === i ? value : t)) });
+  const removeTime = (i: number) => onChange({ times: line.times.filter((_, j) => j !== i) });
+  const addTime = () => onChange({ times: [...line.times, nextTime(line.times)] });
+  const title = line.medicationName.trim() || `Medicine ${index + 1}`;
+
+  return (
+    <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-bold text-cyan-300 flex items-center gap-1.5 min-w-0">
+          <Pill className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{index + 1}. {title}</span>
+        </p>
+        {canRemove && (
+          <button type="button" onClick={onRemove} aria-label={`Remove ${title}`}
+            className="px-2 py-1 rounded-lg text-[11px] text-rose-300 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/30 flex items-center gap-1">
+            <Trash2 className="w-3.5 h-3.5" /> Remove
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label htmlFor={id('name')} className={labelCls}>Medicine Name</label>
+          <input id={id('name')} list="medicines" value={line.medicationName} onChange={(e) => onChange({ medicationName: e.target.value })}
+            className={inputCls} required maxLength={120} placeholder="e.g. Metformin 500mg" />
+        </div>
+        <div>
+          <label htmlFor={id('dose')} className={labelCls}>Dosage Instructions</label>
+          <input id={id('dose')} value={line.dosage} onChange={(e) => onChange({ dosage: e.target.value })} className={inputCls} required maxLength={100} />
+        </div>
+      </div>
+
+      <fieldset>
+        <legend className="text-xs font-medium text-slate-300 mb-1.5">
+          Dose times <span className="text-slate-500 font-normal">({line.times.length} a day)</span>
+        </legend>
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="text-[11px] text-slate-500">Quick fill:</span>
+          <div className="flex gap-1" role="group" aria-label="Quick fill dose times">
+            {FREQUENCY_PRESETS.map((f) => (
+              <button key={f.label} type="button" onClick={() => onChange({ times: f.times })} title={f.label}
+                className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:border-cyan-500/60">
+                {f.times.length}x
+              </button>
+            ))}
+          </div>
+        </div>
+        <ul className="flex flex-wrap gap-2">
+          {line.times.map((t, i) => (
+            <li key={i} className="flex items-center gap-1 rounded-xl bg-slate-950 border border-slate-800 pl-2 pr-1 py-1">
+              <Clock className="w-3.5 h-3.5 text-slate-500" aria-hidden />
+              <input type="time" value={t} required aria-label={`${title} dose time ${i + 1}`}
+                onChange={(e) => setTime(i, e.target.value)}
+                className="bg-transparent text-sm text-slate-100 focus:outline-none [color-scheme:dark]" />
+              {line.times.length > 1 && (
+                <button type="button" onClick={() => removeTime(i)} aria-label={`Remove time ${t}`}
+                  className="p-1 rounded-md text-slate-500 hover:text-rose-300 hover:bg-rose-500/10">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </li>
+          ))}
+          {line.times.length < MAX_TIMES && (
+            <li>
+              <button type="button" onClick={addTime}
+                className="h-full px-3 py-1.5 rounded-xl border border-dashed border-slate-700 text-slate-300 hover:border-cyan-500/60 hover:text-cyan-300 text-xs flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" /> Add time
+              </button>
+            </li>
+          )}
+        </ul>
+        <p className="text-[11px] text-slate-500 mt-1.5">Times are in clinic time (East Africa Time). Up to {MAX_TIMES} a day.</p>
+      </fieldset>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label htmlFor={id('days')} className="text-xs font-medium text-slate-300">Course Duration</label>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
+              <input type="checkbox" checked={line.ongoing} onChange={(e) => onChange({ ongoing: e.target.checked })} className="accent-cyan-400" />
+              Ongoing (chronic)
+            </label>
+          </div>
+          <div className={`flex items-center gap-3 ${line.ongoing ? 'opacity-40' : ''}`}>
+            <input id={id('days')} type="range" min={1} max={30} value={line.durationDays} disabled={line.ongoing}
+              onChange={(e) => onChange({ durationDays: Number(e.target.value) })}
+              className="w-full accent-cyan-400 bg-slate-800 rounded-lg cursor-pointer" />
+            <span className="px-3 py-1 rounded-lg bg-slate-900 border border-slate-800 text-cyan-400 font-bold text-sm min-w-[78px] text-center">
+              {line.ongoing ? 'Ongoing' : `${line.durationDays} Days`}
+            </span>
+          </div>
+        </div>
+        <div>
+          <label htmlFor={id('disp')} className={labelCls}>Doses Handed Out Now</label>
+          <input id={id('disp')} type="number" min={0} max={10000} value={line.dispensedOverride ?? String(suggestedDoses(line))}
+            onChange={(e) => onChange({ dispensedOverride: e.target.value })} className={inputCls} />
+        </div>
+      </div>
+    </div>
   );
 };
 

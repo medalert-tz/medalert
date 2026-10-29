@@ -177,21 +177,25 @@ export const App: React.FC = () => {
     const needsPairing = !store.get(tokenKey(patient.id)) || patient.device?.serial !== f.wearableSerial.trim();
     if (needsPairing) await pairWatch(patient.id, f.wearableSerial.trim());
 
-    const instructions = [f.dosage.trim(), f.notes.trim()].filter(Boolean).join('. ').slice(0, 200);
-    const rx = await api.prescribe(patient.id, {
-      drug_name: f.medicationName.trim(),
-      dose_instructions: instructions || undefined,
-      times: f.times,
-      start_date: f.startDate,
-      duration_days: f.ongoing ? null : f.durationDays,
-      prescriber: f.prescriber.trim() || undefined,
-    });
-    const final = f.dosesDispensed > 0 ? await api.dispense(rx.id, f.dosesDispensed) : rx;
+    // One prescription per medicine line, each with its own times and dispensed doses.
+    const saved: Prescription[] = [];
+    for (const m of f.medicines) {
+      const instructions = [m.dosage.trim(), f.notes.trim()].filter(Boolean).join('. ').slice(0, 200);
+      const rx = await api.prescribe(patient.id, {
+        drug_name: m.medicationName.trim(),
+        dose_instructions: instructions || undefined,
+        times: m.times,
+        start_date: f.startDate,
+        duration_days: m.ongoing ? null : m.durationDays,
+        prescriber: f.prescriber.trim() || undefined,
+      });
+      saved.push(m.dosesDispensed > 0 ? await api.dispense(rx.id, m.dosesDispensed) : rx);
+    }
 
     setLastPush({
       patientName: patient.display_name,
       serial: f.wearableSerial.trim(),
-      prescription: final,
+      prescriptions: saved,
       at: new Date(),
       paired: needsPairing,
     });
