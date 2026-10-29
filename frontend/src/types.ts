@@ -151,6 +151,16 @@ export interface DoseFeedbackMessage {
   mascotMood: 'happy' | 'cheering' | 'supportive' | 'calm';
 }
 
+/** One medicine line in the prescribe form. A patient can get several at once. */
+export interface MedicineLine {
+  medicationName: string;
+  dosage: string;
+  times: string[]; // "HH:MM", local time, chosen by the clinician
+  ongoing: boolean;
+  durationDays: number;
+  dosesDispensed: number;
+}
+
 /** Everything the "Confirm and Push" form collects. */
 export interface PrescribeForm {
   target: 'new' | 'selected';
@@ -158,13 +168,8 @@ export interface PrescribeForm {
   condition: string;
   facility: string;
   wearableSerial: string;
-  medicationName: string;
-  dosage: string;
-  times: string[];
-  ongoing: boolean;
-  durationDays: number;
   startDate: string;
   prescriber: string;
   notes: string;
-  dosesDispensed: number;
+  medicines: MedicineLine[];
 }
