@@ -34,8 +34,12 @@ pip install -r requirements.txt -r requirements-dev.txt
 Create a `.env` file (never commit it):
 
 ```
-MEDALERT_API_KEY=<paste a random key: python -c "import secrets; print(secrets.token_urlsafe(24))">
 MEDALERT_DEMO_MODE=1
+# Optional: lets self-managed patients photograph a paper prescription and have it read.
+# Without it they type their medicines in (the photo stays on screen beside the form).
+ANTHROPIC_API_KEY=
+# Optional: only for hospital systems calling the API directly (X-API-Key header).
+MEDALERT_API_KEY=
 ```
 
 `MEDALERT_DEMO_MODE=1` turns on the demo time controls (fast-forward to the next dose,
@@ -43,10 +47,25 @@ skip a day, finish a course, reset). Leave it out for anything except demos.
 
 ```bash
 python -m scripts.seed_demo        # optional: 4 fictional patients with a week of history
-uvicorn app.main:app --reload      # open http://localhost:8000 and paste the key
+cd frontend && npm install && npm run build && cd ..   # builds the UI the server shows at /
+uvicorn app.main:app --reload      # open http://localhost:8000
 ```
 
-The React UI is already built (`frontend/dist`), so Node is **not** needed just to run it.
+## Logging in
+
+The front page has two portals:
+
+- **Clinician portal** — username + password. The very first visit asks you to create the
+  first clinician account; after that, logged-in clinicians add colleagues
+  (`POST /api/v1/auth/clinicians`, or `/docs`). Clinicians see a **Dashboard** of all their
+  patients' progress and a **Prescribe & patients** page.
+- **Patient portal** — the patient types the code their clinician gave them (shown once when
+  the clinician links their watch; **New patient code** issues a fresh one). They see their
+  watch, their medicines and their doses.
+- **My hospital doesn't use MediAlert yet** — a patient sets up their own reminders by
+  photographing their paper prescription (read by Claude if `ANTHROPIC_API_KEY` is set) or
+  typing it in. They check every medicine and time before saving. These self-managed
+  patients don't appear in any clinic's dashboard.
 
 ### Changing the React UI
 
@@ -63,9 +82,11 @@ Keep `uvicorn` running in another terminal while using `npm run dev`.
 
 ## Demo script (2 minutes)
 
-1. Connect with the key. Neema is already in **Needs attention** — the risk reasons say why.
-2. Fill **Prescribe Medication** for a new patient → **Confirm and Push to Wearable**. The watch shows *New Prescription Received*.
-3. **Trigger Next Reminder** → the watch buzzes. Try **Delay 30m**, then **Taken**.
+Use two browser windows side by side: one logged in as a clinician, one as the patient.
+
+1. Log in as a clinician. The **Dashboard** shows every patient's progress.
+2. **Prescribe & patients** → fill the form for a new patient (add as many medicines and times as needed) → **Confirm**. Note the **patient portal code**.
+3. In the other window, open the **Patient portal** with that code. Back in the clinician window, **Trigger Next Reminder** → the patient's watch buzzes. Try **Delay 30m**, then **Taken**.
 4. **Skip a Day** → doses become missed, risk rises, nurse alerts open.
 5. **Jump to Complete** → course finishes, celebration.
 6. In **Needs attention**, enter your name + outcome → **Mark followed up**.
@@ -73,7 +94,7 @@ Keep `uvicorn` running in another terminal while using `npm run dev`.
 ## Test
 
 ```bash
-pytest -q                          # backend: 23 tests
+pytest -q                          # backend tests
 cd frontend && npm run typecheck   # UI: TypeScript strict mode
 ```
 
@@ -85,18 +106,22 @@ app/
   config.py            env/.env settings (no secret defaults)
   models.py            SQLAlchemy tables
   schemas.py           request/response models incl. the tiny device protocol
-  security.py          API key (clinicians) + hashed per-device tokens
-  api/clinician.py     /api/v1 — patients, prescriptions, dispensing, doses, interventions
+  security.py          passwords, sessions, patient codes, device tokens (all hashed), rate limits
+  api/auth.py          /api/v1/auth — clinician setup, login, logout, add colleagues
+  api/clinician.py     /api/v1 — dashboard, patients, prescriptions, dispensing, doses, interventions
+  api/patient.py       /api/patient/v1 — patient login, self-managed medicines, prescription photo
   api/device.py        /api/device/v1 — sync, ack (taken/snooze/skipped/missed)
   api/demo.py          /api/demo — time controls, only when MEDALERT_DEMO_MODE=1
   services/schedule.py dose slots (local time → UTC), course totals, completion, refills
   services/adherence.py monitor → features → risk → interventions, course progress
   services/risk.py     RiskModel interface + HeuristicRiskModel v0
+  services/vision.py   reads a prescription photo with Claude (draft only; patient confirms)
   static/              classic dashboard (/classic)
 frontend/              React + Vite + Tailwind UI (src/), built output in dist/
   src/api.ts           all calls to the backend
-  src/App.tsx          state, polling, watch state machine, demo controls
-  src/components/      ClinicianView, WearableView, SmartwatchFrame, …
+  src/App.tsx          login page or the right portal
+  src/components/      LoginPage, ClinicianPortal, PatientPortal, ProgressDashboard,
+                       ClinicianView, AddMedicines, WearableView, …
 scripts/seed_demo.py   fictional demo data
 tests/                 backend tests
 docs/MVP_SPEC.md       requirements, assumptions, architecture
@@ -110,6 +135,6 @@ model version in `risk_assessments`, which doubles as a training/evaluation log.
 
 ## Not production-ready yet
 
-Shared API key instead of user accounts/roles; SQLite + `create_all` instead of
+No roles yet (every clinician account can do everything); SQLite + `create_all` instead of
 Postgres + migrations; no audit log; no HTTPS termination; no consent capture; demo mode
 must stay off with real patients. See the spec's *Deferred* and *Privacy* sections.

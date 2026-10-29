@@ -7,12 +7,12 @@ interface DemoControlsProps {
   hasPatient: boolean;
   isOngoing: boolean;
   onTriggerNextReminder: () => void;
-  onAdvanceOneDose: () => void;
+  onAdvanceOneDose?: () => void;
   onSkipDay: () => void;
   onCompleteCourse: () => void;
   onResetDemo: () => void;
-  watchShape: WatchShape;
-  setWatchShape: (shape: WatchShape) => void;
+  watchShape?: WatchShape;
+  setWatchShape?: (shape: WatchShape) => void;
 }
 
 /** Demo time controls. They move the server's clock forward, so every real rule
@@ -48,11 +48,13 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
             title="Move the clock to this patient's next dose time">
             <Bell className="w-3.5 h-3.5" /><span>Trigger Next Reminder</span>
           </button>
-          <button disabled={!enabled || !hasPatient} onClick={onAdvanceOneDose}
-            className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25`}
-            title="Move to the next dose and press Taken">
-            <FastForward className="w-3.5 h-3.5" /><span>Log Next Dose</span>
-          </button>
+          {onAdvanceOneDose && (
+            <button disabled={!enabled || !hasPatient} onClick={onAdvanceOneDose}
+              className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25`}
+              title="Move to the next dose and press Taken">
+              <FastForward className="w-3.5 h-3.5" /><span>Log Next Dose</span>
+            </button>
+          )}
           <button disabled={!enabled} onClick={onSkipDay}
             className={`${btn} bg-rose-700 hover:bg-rose-600 text-white`}
             title="Let a whole day pass with no button presses (shows risk + nurse alerts)">
@@ -63,10 +65,12 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
             title={isOngoing ? 'Ongoing regimens have no end' : 'Take every remaining dose of this course'}>
             <Trophy className="w-3.5 h-3.5" /><span>Jump to Complete</span>
           </button>
-          <button onClick={() => setWatchShape(watchShape === 'round' ? 'square' : 'round')}
-            className={`${btn} bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium border border-slate-700`}>
-            <Smartphone className="w-3.5 h-3.5 text-cyan-400" /><span>{watchShape === 'round' ? 'Square Watch' : 'Round Watch'}</span>
-          </button>
+          {setWatchShape && (
+            <button onClick={() => setWatchShape(watchShape === 'round' ? 'square' : 'round')}
+              className={`${btn} bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium border border-slate-700`}>
+              <Smartphone className="w-3.5 h-3.5 text-cyan-400" /><span>{watchShape === 'round' ? 'Square Watch' : 'Round Watch'}</span>
+            </button>
+          )}
           <button disabled={!enabled} onClick={onResetDemo} aria-label="Reset demo data"
             className={`${btn} bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 font-medium border border-slate-700`}
             title="Delete all demo data and reset the clock">

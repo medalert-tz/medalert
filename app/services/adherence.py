@@ -271,7 +271,8 @@ def run_monitor(db: Session, now: datetime, settings: Settings, model: RiskModel
     for p in patients:
         ra = assess_patient(db, p, now, settings, model)
         assessed += 1
-        if open_intervention_if_needed(db, ra, now):
+        # Self-managed patients have no clinic behind them, so no nurse alert is opened.
+        if not p.self_managed and open_intervention_if_needed(db, ra, now):
             opened += 1
     db.commit()
     return MonitorReport(created, missed, assessed, opened)

@@ -6,7 +6,7 @@ const ITEMS = [
   { Icon: Brain, title: 'Risk prediction', text: 'A transparent baseline score with reasons. A trained model replaces it once external and pilot data are ready.' },
   { Icon: Cpu, title: 'Wearable hardware', text: 'Simulated here. The watch uses the same two-call device protocol a real low-cost device would.' },
   { Icon: Radio, title: 'Connectivity', text: 'Undecided (GSM/SMS, LoRa or a Bluetooth hub). Whichever bridge is chosen talks to the same API.' },
-  { Icon: Lock, title: 'Security & privacy', text: 'MVP uses one clinic key + per-device tokens. Per-user accounts, audit log and Tanzania PDPA registration come before the pilot.' },
+  { Icon: Lock, title: 'Security & privacy', text: 'Clinician accounts with hashed passwords, one-time patient codes and per-device tokens. Audit log, roles and Tanzania PDPA registration come before the pilot.' },
 ];
 
 export const DisclaimerBanner: React.FC = () => {
