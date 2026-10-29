@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MediAlert — Clinic</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d6b5c'/%3E%3Cpath d='M7 3h2v4h4v2H9v4H7V9H3V7h4z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">✚</span>
+      <div>
+        <strong>MediAlert</strong>
+        <span class="sub">Prescribe · Dispense · Monitor · Predict · Intervene</span>
+      </div>
+    </div>
+    <form id="key-form" class="keybox" autocomplete="off">
+      <label for="api-key">Clinic API key</label>
+      <input id="api-key" type="password" required placeholder="Paste key">
+      <button type="submit">Connect</button>
+    </form>
+  </header>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <main id="main" class="grid" hidden>
+    <section class="col" aria-labelledby="queue-h">
+      <div class="row-between">
+        <h2 id="queue-h">Needs attention</h2>
+        <button id="run-monitor" class="ghost" type="button">Re-check now</button>
+      </div>
+      <ol id="queue" class="queue"></ol>
+
+      <div class="row-between">
+        <h2 id="patients-h">Patients</h2>
+        <button id="new-patient-btn" class="ghost" type="button" aria-expanded="false" aria-controls="new-patient">+ Add</button>
+      </div>
+      <form id="new-patient" class="card stack" hidden>
+        <label>Name <input name="display_name" required maxlength="120"></label>
+        <label>Condition <input name="condition" maxlength="120" placeholder="e.g. Hypertension"></label>
+        <label>Facility <input name="facility" maxlength="120"></label>
+        <label>Phone (optional) <input name="phone" type="tel" maxlength="32"></label>
+        <button type="submit">Register patient</button>
+      </form>
+      <ul id="patients" class="patients" aria-labelledby="patients-h"></ul>
+    </section>
+
+    <section class="col wide" aria-labelledby="detail-h">
+      <div id="empty-detail" class="empty">Select a patient to see their regimen, doses and device.</div>
+      <div id="detail" hidden>
+        <div class="row-between">
+          <div>
+            <h2 id="detail-h"></h2>
+            <p id="detail-meta" class="muted"></p>
+          </div>
+          <div id="detail-risk"></div>
+        </div>
+        <ul id="detail-factors" class="factors"></ul>
+
+        <h3>Last 7 days</h3>
+        <div id="doses" class="doses" role="list"></div>
+        <p class="legend muted"><span class="dot taken"></span>Taken <span class="dot missed"></span>Missed <span class="dot pending"></span>Upcoming</p>
+
+        <h3>Regimens</h3>
+        <div id="rx-list" class="stack"></div>
+
+        <details class="card">
+          <summary>Prescribe</summary>
+          <form id="rx-form" class="stack">
+            <label>Medicine <input name="drug_name" required maxlength="120" placeholder="e.g. Amlodipine 5mg"></label>
+            <label>Instructions <input name="dose_instructions" maxlength="200" placeholder="1 tablet after food"></label>
+            <label>Times (local, comma-separated) <input name="times" required placeholder="08:00, 20:00" pattern="^\s*\d{2}:\d{2}(\s*,\s*\d{2}:\d{2})*\s*$"></label>
+            <div class="two">
+              <label>Start date <input name="start_date" type="date" required></label>
+              <label>Days (blank = ongoing) <input name="duration_days" type="number" min="1"></label>
+            </div>
+            <label>Prescriber <input name="prescriber" maxlength="120"></label>
+            <button type="submit">Save prescription</button>
+          </form>
+        </details>
+
+        <h3>Wearable</h3>
+        <div id="device-info" class="card"></div>
+
+        <details class="card sim">
+          <summary>Device simulator <span class="muted">(stands in for the wearable)</span></summary>
+          <p class="muted small">Uses the device token from pairing. Tokens are kept only in this browser tab.</p>
+          <div class="row">
+            <button id="sim-sync" type="button">Sync</button>
+            <button id="sim-press" type="button" class="primary">Press button (dose taken)</button>
+          </div>
+          <output id="sim-out" class="sim-out" aria-live="polite"></output>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+"""MediAlert API + clinician dashboard.
+
+Run:  uvicorn app.main:app --reload
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI
+from sqlalchemy import inspect, text
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+
+from app.api import clinician, demo, device
+from app.config import Settings
+from app.db import make_engine, make_sessionmaker
+from app.models import Base
+from app.services.adherence import run_monitor
+from app.services.risk import HeuristicRiskModel, RiskModel
+
+log = logging.getLogger("medialert")
+STATIC = Path(__file__).parent / "static"  # classic dashboard (no build step)
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"  # React UI build
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def create_app(
+    settings: Settings | None = None,
+    clock: Callable[[], datetime] = utcnow,
+    risk_model: RiskModel | None = None,
+) -> FastAPI:
+    settings = settings or Settings.from_env()
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)  # MVP; use Alembic migrations before the pilot.
+    _add_missing_columns(engine)
+    if settings.demo_mode and not isinstance(clock, demo.DemoClock):
+        clock = demo.DemoClock(clock)
+    SessionLocal = make_sessionmaker(engine)
+    model = risk_model or HeuristicRiskModel(threshold=settings.risk_threshold)
+
+    def monitor_once() -> None:
+        with SessionLocal() as db:
+            r = run_monitor(db, clock(), settings, model)
+            if r.doses_marked_missed or r.interventions_opened:
+                log.info("monitor: %s", r)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        task = None
+        if settings.monitor_interval_seconds > 0:
+            async def loop():
+                while True:
+                    try:
+                        await run_in_threadpool(monitor_once)
+                    except Exception:  # keep the loop alive; surface in logs
+                        log.exception("monitor run failed")
+                    await asyncio.sleep(settings.monitor_interval_seconds)
+            task = asyncio.create_task(loop())
+        if not settings.api_key:
+            log.warning("MEDALERT_API_KEY is not set — clinician API will refuse requests.")
+        yield
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        engine.dispose()
+
+    app = FastAPI(
+        title="MediAlert API",
+        version="0.1.0",
+        description="Prescribe → Dispense → Monitor → Predict → Intervene. "
+        "Clinician API uses the `X-API-Key` header; wearables use `X-Device-Token`.",
+        lifespan=lifespan,
+    )
+    app.state.settings = settings
+    app.state.clock = clock
+    app.state.risk_model = model
+    app.state.SessionLocal = SessionLocal
+    app.state.engine = engine
+
+    app.include_router(clinician.router)
+    app.include_router(device.router)
+    app.include_router(demo.router)
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        return {"ok": True}
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    @app.get("/classic", include_in_schema=False)
+    def classic():
+        return FileResponse(STATIC / "index.html")
+
+    if (FRONTEND_DIST / "index.html").is_file():
+        # React UI (built with `npm run build` in frontend/)
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+        @app.get("/", include_in_schema=False)
+        def index():
+            return FileResponse(FRONTEND_DIST / "index.html")
+    else:
+        @app.get("/", include_in_schema=False)
+        def index_classic():
+            return FileResponse(STATIC / "index.html")
+
+    return app
+
+
+def _add_missing_columns(engine) -> None:
+    """Tiny stand-in for migrations so databases from earlier versions keep working."""
+    cols = {c["name"] for c in inspect(engine).get_columns("dose_events")}
+    if "snoozed_until" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE dose_events ADD COLUMN snoozed_until DATETIME"))
+
+
+app = create_app()
