@@ -23,6 +23,7 @@ export interface Patient {
   phone: string | null;
   condition: string | null;
   facility: string | null;
+  self_managed: boolean;
   created_at: string;
   device: Device | null;
   risk: Risk | null;
@@ -130,6 +131,56 @@ export interface DemoResult {
   monitor: MonitorReport | null;
 }
 
+// ---------- Accounts and portals ----------
+
+export interface Clinician {
+  id: number;
+  username: string;
+  display_name: string;
+}
+
+export interface PatientMe {
+  id: number;
+  display_name: string;
+  facility: string | null;
+  self_managed: boolean;
+}
+
+/** What the browser remembers about who is logged in. */
+export type StoredSession =
+  | { kind: 'clinician'; token: string; name: string }
+  | { kind: 'patient'; token: string; name: string };
+
+export interface AccessCode {
+  access_code: string;
+}
+
+export interface PatientProgress {
+  patient: Patient;
+  active_medicines: string[];
+  doses_taken: number;
+  doses_missed: number;
+  adherence_pct: number | null;
+  next_dose_at: string | null;
+  refill_due: boolean;
+}
+
+export interface ScannedMedicine {
+  drug_name: string;
+  dose_instructions: string | null;
+  times: string[];
+  duration_days: number | null;
+  confidence: 'high' | 'medium' | 'low';
+  note: string | null;
+}
+
+export interface ScanResult {
+  is_prescription: boolean;
+  medicines: ScannedMedicine[];
+  warnings: string[];
+  model: string;
+}
+
 // ---------- UI-only types ----------
 
 export type WatchState =
@@ -142,7 +193,7 @@ export type WatchState =
 
 export type WatchShape = 'round' | 'square';
 
-export type ActiveTab = 'split' | 'clinician' | 'wearable';
+export type ClinicianTab = 'dashboard' | 'prescribe';
 
 export interface DoseFeedbackMessage {
   title: string;

@@ -18,10 +18,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from app.api import clinician, demo, device
+from app.api import auth, clinician, demo, device, patient
 from app.config import Settings
 from app.db import make_engine, make_sessionmaker
 from app.models import Base
+from app.security import RateLimiter
 from app.services.adherence import run_monitor
 from app.services.risk import HeuristicRiskModel, RiskModel
 
@@ -66,8 +67,6 @@ def create_app(
                         log.exception("monitor run failed")
                     await asyncio.sleep(settings.monitor_interval_seconds)
             task = asyncio.create_task(loop())
-        if not settings.api_key:
-            log.warning("MEDALERT_API_KEY is not set — clinician API will refuse requests.")
         yield
         if task:
             task.cancel()
@@ -79,7 +78,9 @@ def create_app(
         title="MediAlert API",
         version="0.1.0",
         description="Prescribe → Dispense → Monitor → Predict → Intervene. "
-        "Clinician API uses the `X-API-Key` header; wearables use `X-Device-Token`.",
+        "Clinicians log in at `/api/v1/auth/login` and send `Authorization: Bearer <token>` "
+        "(hospital systems may use the `X-API-Key` header). Patients log in with their clinic "
+        "code at `/api/patient/v1/login`; physical wearables use `X-Device-Token`.",
         lifespan=lifespan,
     )
     app.state.settings = settings
@@ -87,8 +88,12 @@ def create_app(
     app.state.risk_model = model
     app.state.SessionLocal = SessionLocal
     app.state.engine = engine
+    app.state.login_limiter = RateLimiter(limit=10, window=300)
+    app.state.scan_limiter = RateLimiter(limit=20, window=3600)
 
+    app.include_router(auth.router)
     app.include_router(clinician.router)
+    app.include_router(patient.router)
     app.include_router(device.router)
     app.include_router(demo.router)
 
@@ -119,10 +124,18 @@ def create_app(
 
 def _add_missing_columns(engine) -> None:
     """Tiny stand-in for migrations so databases from earlier versions keep working."""
-    cols = {c["name"] for c in inspect(engine).get_columns("dose_events")}
-    if "snoozed_until" not in cols:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE dose_events ADD COLUMN snoozed_until DATETIME"))
+    wanted = {
+        "dose_events": {"snoozed_until": "DATETIME"},
+        "patients": {"self_managed": "BOOLEAN NOT NULL DEFAULT FALSE"},
+        "devices": {"access_code_hash": "VARCHAR(64)"},
+    }
+    insp = inspect(engine)
+    for table, columns in wanted.items():
+        existing = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in columns.items():
+            if name not in existing:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 app = create_app()

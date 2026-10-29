@@ -13,13 +13,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Base, DoseEvent, Patient, Prescription
+from app.models import AuthSession, Base, DoseEvent, Patient, Prescription
 from app.schemas import DemoAdvanceIn, DemoPatientIn, DemoResultOut, DemoStatusOut, MonitorOut
-from app.security import require_api_key
+from app.security import require_clinician
 from app.services.adherence import apply_dose_action, find_ackable_dose, run_monitor
 from app.services.schedule import complete_finished_courses, ensure_slots
 
-router = APIRouter(prefix="/api/demo", tags=["demo"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/api/demo", tags=["demo"], dependencies=[Depends(require_clinician)])
 
 
 class DemoClock:
@@ -129,7 +129,12 @@ def reset(request: Request):
     """Wipe all data and return the clock to real time. Demo databases only."""
     clock = _clock(request)
     engine = request.app.state.engine
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    # Patient data is wiped; clinician accounts and their logins are kept.
+    keep = {"clinicians", "auth_sessions"}
+    tables = [t for t in Base.metadata.sorted_tables if t.name not in keep]
+    with engine.begin() as conn:
+        conn.execute(AuthSession.__table__.delete().where(AuthSession.kind == "patient"))
+        for table in reversed(tables):  # children before parents
+            conn.execute(table.delete())
     clock.offset = timedelta()
     return _result(clock, "Demo data cleared")

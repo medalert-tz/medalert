@@ -5,6 +5,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -29,6 +30,9 @@ class Patient(Base):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     condition: Mapped[str | None] = mapped_column(String(120), nullable=True)
     facility: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # True when the patient set up their own schedule (their hospital isn't on MediAlert).
+    # Self-managed patients don't appear in any clinic's dashboard or nurse queue.
+    self_managed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
     device: Mapped["Device | None"] = relationship(back_populates="patient", uselist=False)
@@ -42,6 +46,8 @@ class Device(Base):
     patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), unique=True)
     serial: Mapped[str] = mapped_column(String(64))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Short code the patient types to open the patient portal. Stored only as a hash.
+    access_code_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     paired_at: Mapped[datetime] = mapped_column(DateTime)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     battery_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -122,3 +128,28 @@ class Intervention(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Clinician(Base):
+    __tablename__ = "clinicians"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AuthSession(Base):
+    """A logged-in clinician or patient. Only the SHA-256 of the session token is stored."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # clinician | patient
+    clinician_id: Mapped[int | None] = mapped_column(ForeignKey("clinicians.id"), nullable=True)
+    patient_id: Mapped[int | None] = mapped_column(ForeignKey("patients.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)

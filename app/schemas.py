@@ -41,6 +41,7 @@ class PatientOut(BaseModel):
     phone: str | None
     condition: str | None
     facility: str | None
+    self_managed: bool = False
     created_at: datetime
     device: DeviceOut | None = None
     risk: RiskOut | None = None
@@ -54,6 +55,100 @@ class DevicePairIn(BaseModel):
 class DevicePairOut(BaseModel):
     serial: str
     device_token: str = Field(description="Shown once. Store it on the device; it cannot be retrieved later.")
+    access_code: str = Field(description="Shown once. Give it to the patient to open the patient portal.")
+
+
+class AccessCodeOut(BaseModel):
+    access_code: str = Field(description="Shown once. Older codes and patient logins stop working.")
+
+
+# ---- Clinician accounts ----
+
+_USERNAME = r"^[a-zA-Z0-9._-]{3,64}$"
+
+
+class ClinicianOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    username: str
+    display_name: str
+
+
+class ClinicianCreateIn(BaseModel):
+    username: str = Field(pattern=_USERNAME, description="3-64 letters, digits, dot, dash or underscore")
+    display_name: str = Field(min_length=1, max_length=120, examples=["Dr. Amina Juma"])
+    password: str = Field(min_length=8, max_length=200)
+
+
+class LoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ClinicianSessionOut(BaseModel):
+    token: str
+    clinician: ClinicianOut
+
+
+class AuthStatusOut(BaseModel):
+    needs_setup: bool = Field(description="True until the first clinician account exists")
+
+
+# ---- Patient portal ----
+
+class PatientLoginIn(BaseModel):
+    code: str = Field(min_length=4, max_length=20, examples=["K7QM-4XTP"])
+
+
+class PatientRegisterIn(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+
+
+class PatientMeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    display_name: str
+    facility: str | None
+    self_managed: bool
+
+
+class PatientSessionOut(BaseModel):
+    token: str
+    patient: PatientMeOut
+    access_code: str | None = Field(default=None, description="Only on self-registration: keep it to log in again")
+
+
+class ScanIn(BaseModel):
+    image_base64: str = Field(min_length=100, max_length=8_000_000)
+    media_type: Literal["image/jpeg", "image/png", "image/webp", "image/gif"] = "image/jpeg"
+
+
+class ScannedMedicine(BaseModel):
+    drug_name: str
+    dose_instructions: str | None = None
+    times: list[str] = Field(default_factory=list, description="Suggested local HH:MM times; patient must check")
+    duration_days: int | None = None
+    confidence: Literal["high", "medium", "low"] = "medium"
+    note: str | None = None
+
+
+class ScanOut(BaseModel):
+    is_prescription: bool
+    medicines: list[ScannedMedicine]
+    warnings: list[str]
+    model: str
+
+
+# ---- Clinician dashboard ----
+
+class PatientProgressOut(BaseModel):
+    patient: PatientOut
+    active_medicines: list[str]
+    doses_taken: int
+    doses_missed: int = Field(description="Missed or skipped in the period")
+    adherence_pct: float | None = Field(description="Taken / (taken + missed + skipped); None if nothing due yet")
+    next_dose_at: datetime | None
+    refill_due: bool
 
 
 class PrescriptionIn(BaseModel):

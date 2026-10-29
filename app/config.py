@@ -33,7 +33,8 @@ def _float(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     database_url: str = "sqlite:///./medialert.db"
-    # Clinician/hospital API key. If unset, clinician endpoints refuse all requests.
+    # Optional key for hospital systems calling the clinician API (X-API-Key header).
+    # People log in with clinician accounts instead.
     api_key: str | None = None
     # Local timezone used to interpret prescription times like "08:00".
     timezone: str = "Africa/Dar_es_Salaam"
@@ -51,6 +52,10 @@ class Settings:
     monitor_interval_seconds: int = 60
     # Enables /api/demo time controls (fast-forward, reset). Never enable with real patients.
     demo_mode: bool = False
+    # Reading prescription photos with Claude. Without a key, patients type the
+    # prescription in themselves (the photo is still shown beside the form).
+    anthropic_api_key: str | None = None
+    vision_model: str = "claude-sonnet-5-5"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -66,4 +71,6 @@ class Settings:
             refill_warning_days=_int("MEDALERT_REFILL_WARNING_DAYS", cls.refill_warning_days),
             monitor_interval_seconds=_int("MEDALERT_MONITOR_INTERVAL", cls.monitor_interval_seconds),
             demo_mode=os.environ.get("MEDALERT_DEMO_MODE", "").strip().lower() in {"1", "true", "yes"},
+            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+            vision_model=os.environ.get("MEDALERT_VISION_MODEL", cls.vision_model),
         )

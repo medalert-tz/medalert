@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { DeviceAck, DeviceSync, DoseFeedbackMessage, Patient, WatchAction, WatchState } from '../types';
+import type { DeviceAck, DeviceSync, DoseFeedbackMessage, WatchAction, WatchState } from '../types';
 import { fmtTime, getRandomReminderMicrocopy, getDoseFeedback } from '../utils/schedule';
 import { MediPalMascot } from './MediPalMascot';
 import {
@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 
 interface WearableViewProps {
-  patient: Patient | null;
+  /** Only the id and paired watch are used, so the patient portal can pass a slim object. */
+  patient: { id: number; device?: { serial: string } | null } | null;
   firstName: string;
   hasToken: boolean;
   sync: DeviceSync | null;
