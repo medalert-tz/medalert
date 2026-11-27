@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Pill, Plus, CalendarClock } from 'lucide-react';
 import { ApiError, patientApi } from '../api';
-import type { DeviceSync, Dose, PatientMe, Prescription, WatchAction, WatchShape, WatchState } from '../types';
+import type { AdvisorLang, ChatMsg, DeviceSync, Dose, PatientMe, Prescription, WatchAction, WatchShape, WatchState } from '../types';
 import { fmtDay, fmtTime, hhmmTo12, parseUtc } from '../utils/schedule';
 import { PortalHeader } from './PortalHeader';
 import { SmartwatchFrame } from './SmartwatchFrame';
@@ -93,6 +93,15 @@ export const PatientPortal: React.FC<Props> = ({ token, name, newCode, onLogout 
     return () => { clearInterval(a); clearInterval(b); };
   }, [refreshLists, refreshWatch, fail]);
 
+  const askAdvisor = useCallback(async (messages: ChatMsg[], lang: AdvisorLang) => {
+    try {
+      return (await api.askAdvisor(messages, lang)).reply;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) onLogout();
+      throw e;
+    }
+  }, [api, onLogout]);
+
   const handleWatchAction = useCallback(async (action: WatchAction) => {
     try {
       const ack = await api.ack(action);
@@ -157,6 +166,7 @@ export const PatientPortal: React.FC<Props> = ({ token, name, newCode, onLogout 
                   setWatchState={setWatchState}
                   onAction={handleWatchAction}
                   onPair={() => {}}
+                  onAskAdvisor={askAdvisor}
                 />
               </SmartwatchFrame>
               <p className="text-[11px] text-slate-500 text-center mt-2">

@@ -40,6 +40,8 @@ MEDALERT_DEMO_MODE=1
 ANTHROPIC_API_KEY=
 # Optional: only for hospital systems calling the API directly (X-API-Key header).
 MEDALERT_API_KEY=
+# Optional: the "Ask MediPal" voice advisor on the watch (free key from console.groq.com).
+GROQ_API_KEY=
 ```
 
 `MEDALERT_DEMO_MODE=1` turns on the demo time controls (fast-forward to the next dose,
@@ -50,6 +52,22 @@ python -m scripts.seed_demo        # optional: 4 fictional patients with a week 
 cd frontend && npm install && npm run build && cd ..   # builds the UI the server shows at /
 uvicorn app.main:app --reload      # open http://localhost:8000
 ```
+
+## Voice advisor ("Ask MediPal")
+
+On the patient's watch face, **Ask MediPal** opens a voice advisor: the browser listens
+(Chrome or Edge), the server asks a free Groq model for a short, general answer using the
+patient's active medicines as context, and the watch reads it aloud in English or Swahili.
+It never changes a dose and points emergencies to urgent care. Needs `GROQ_API_KEY` on the
+server; without it the watch says the advisor isn't switched on. Endpoint:
+`POST /api/patient/v1/advisor`.
+
+## Put it online (free)
+
+The `Dockerfile` builds the UI and runs the server in one container. On **Render**:
+**New → Blueprint** → pick this repo (it reads `render.yaml`) → paste your `GROQ_API_KEY`
+→ **Apply**. The free plan keeps the SQLite database only until the service restarts, which
+is fine for demos; use Postgres (`DATABASE_URL`) for anything longer.
 
 ## Logging in
 

@@ -189,7 +189,8 @@ export type WatchState =
   | 'reminder'
   | 'dose_logged'
   | 'progress'
-  | 'course_complete';
+  | 'course_complete'
+  | 'advisor';
 
 export type WatchShape = 'round' | 'square';
 
@@ -223,4 +224,12 @@ export interface PrescribeForm {
   prescriber: string;
   notes: string;
   medicines: MedicineLine[];
+}
+
+// ---------- Voice health advisor ----------
+export type AdvisorLang = 'en' | 'sw';
+
+export interface ChatMsg {
+  role: 'user' | 'assistant';
+  content: string;
 }

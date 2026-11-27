@@ -301,3 +301,17 @@ class DemoResultOut(BaseModel):
     offset_minutes: float
     message: str
     monitor: MonitorOut | None = None
+
+
+class AdvisorMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=500)
+
+
+class AdvisorIn(BaseModel):
+    messages: list[AdvisorMessage] = Field(min_length=1, max_length=10)
+    lang: Literal["en", "sw"] = "en"
+
+
+class AdvisorOut(BaseModel):
+    reply: str

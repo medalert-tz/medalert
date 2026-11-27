@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from app.api import auth, clinician, demo, device, patient
+from app.api import advisor, auth, clinician, demo, device, patient
 from app.config import Settings
 from app.db import make_engine, make_sessionmaker
 from app.models import Base
@@ -90,10 +90,12 @@ def create_app(
     app.state.engine = engine
     app.state.login_limiter = RateLimiter(limit=10, window=300)
     app.state.scan_limiter = RateLimiter(limit=20, window=3600)
+    app.state.advisor_limiter = RateLimiter(limit=40, window=3600)
 
     app.include_router(auth.router)
     app.include_router(clinician.router)
     app.include_router(patient.router)
+    app.include_router(advisor.router)
     app.include_router(device.router)
     app.include_router(demo.router)
 

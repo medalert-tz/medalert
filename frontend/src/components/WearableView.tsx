@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import type { DeviceAck, DeviceSync, DoseFeedbackMessage, WatchAction, WatchState } from '../types';
 import { fmtTime, getRandomReminderMicrocopy, getDoseFeedback } from '../utils/schedule';
 import { MediPalMascot } from './MediPalMascot';
+import { AdvisorScreen } from './AdvisorScreen';
+import type { AskAdvisor } from '../hooks/useVoiceAdvisor';
 import {
-  Clock, Check, RotateCcw, X, AlertTriangle, Sparkles, Trophy, ChevronRight, Bell, Link2, PackageOpen,
+  Clock, Check, RotateCcw, X, AlertTriangle, Sparkles, Trophy, ChevronRight, Bell, Link2, PackageOpen, Mic,
 } from 'lucide-react';
 
 interface WearableViewProps {
@@ -19,10 +21,12 @@ interface WearableViewProps {
   onPair: (serial: string) => void;
   /** Demo mode only: jump the clock to the next dose. */
   onTriggerNextReminder?: () => void;
+  /** Voice health advisor. Leave out to hide the "Ask MediPal" button. */
+  onAskAdvisor?: AskAdvisor;
 }
 
 export const WearableView: React.FC<WearableViewProps> = ({
-  patient, firstName, hasToken, sync, clockOffsetMs, watchState, setWatchState, onAction, onPair, onTriggerNextReminder,
+  patient, firstName, hasToken, sync, clockOffsetMs, watchState, setWatchState, onAction, onPair, onTriggerNextReminder, onAskAdvisor,
 }) => {
   const [currentTime, setCurrentTime] = useState('');
   const [microcopy, setMicrocopy] = useState('');
@@ -116,6 +120,14 @@ export const WearableView: React.FC<WearableViewProps> = ({
               <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold">
                 <PackageOpen className="w-3 h-3" /> Refill in {sync.refill_in_days} days
               </div>
+            )}
+            {onAskAdvisor && (
+              <button
+                onClick={() => setWatchState('advisor')}
+                className="mt-1.5 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/40 hover:border-cyan-400 text-cyan-300 text-[10px] font-bold transition-all"
+              >
+                <Mic className="w-3 h-3" /> Ask MediPal
+              </button>
             )}
           </div>
 
@@ -268,6 +280,11 @@ export const WearableView: React.FC<WearableViewProps> = ({
             <button onClick={() => setWatchState('idle')} className="flex-1 py-2 px-3 rounded-xl bg-slate-800 text-slate-300 font-medium text-[11px]">Watch Face</button>
           </div>
         </div>
+      )}
+
+      {/* ================= VOICE ADVISOR ================= */}
+      {watchState === 'advisor' && onAskAdvisor && (
+        <AdvisorScreen onAsk={onAskAdvisor} onClose={() => setWatchState('idle')} />
       )}
 
       {/* ================= COURSE COMPLETE ================= */}

@@ -56,6 +56,10 @@ class Settings:
     # prescription in themselves (the photo is still shown beside the form).
     anthropic_api_key: str | None = None
     vision_model: str = "claude-sonnet-5-5"
+    # Voice health advisor on the watch (Groq, free tier). Without a key the watch
+    # says the advisor isn't switched on; everything else works.
+    groq_api_key: str | None = None
+    advisor_model: str = "openai/gpt-oss-20b"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -73,4 +77,6 @@ class Settings:
             demo_mode=os.environ.get("MEDALERT_DEMO_MODE", "").strip().lower() in {"1", "true", "yes"},
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
             vision_model=os.environ.get("MEDALERT_VISION_MODEL", cls.vision_model),
+            groq_api_key=os.environ.get("GROQ_API_KEY") or None,
+            advisor_model=os.environ.get("MEDALERT_ADVISOR_MODEL", cls.advisor_model),
         )

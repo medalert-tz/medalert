@@ -1,7 +1,7 @@
 // Thin client for the MediAlert backend.
 // Clinicians and patients log in and get a session token (sent as "Authorization: Bearer ...").
 import type {
-  AccessCode, Clinician, DemoResult, DemoStatus, DeviceAck, DeviceSync, Dose, Intervention, MonitorReport,
+  AccessCode, AdvisorLang, ChatMsg, Clinician, DemoResult, DemoStatus, DeviceAck, DeviceSync, Dose, Intervention, MonitorReport,
   Patient, PatientMe, PatientProgress, Prescription, ScanResult, StoredSession, WatchAction,
 } from './types';
 
@@ -124,6 +124,8 @@ export function patientApi(token: string) {
     scan: (image_base64: string, media_type: string) => post<ScanResult>('/api/patient/v1/scan', { image_base64, media_type }),
     sync: () => post<DeviceSync>('/api/device/v1/sync'),
     ack: (action: WatchAction) => post<DeviceAck>('/api/device/v1/ack', { action }),
+    askAdvisor: (messages: ChatMsg[], lang: AdvisorLang) =>
+      post<{ reply: string }>('/api/patient/v1/advisor', { messages, lang }),
   };
 }
 export type PatientApi = ReturnType<typeof patientApi>;
